@@ -1,0 +1,130 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import ks_2samp
+
+# ==============================================================================
+# CONFIGURAÇÕES DO ARQUIVO CSV
+# ==============================================================================
+ARQUIVO_CSV = "dados_granulometria.csv"
+
+COL_RAIO_A = "raio_A_mm"
+COL_CONT_A = "contagem_A"
+COL_RAIO_B = "raio_B_mm"
+COL_CONT_B = "contagem_B"
+
+# ==============================================================================
+# 1. CARREGAMENTO E NORMALIZAÇÃO DOS DADOS
+# ==============================================================================
+def carregar_dados_agrupados(caminho_csv):
+    """Lê as frequências do CSV, calcula probabilidades e expande os dados"""
+    print(f"[INFO] Lendo dados do arquivo: {caminho_csv}...")
+    try:
+        # Força o separador ponto e vírgula
+        df = pd.read_csv(caminho_csv, sep=';')
+        
+        # --- PROCESSAMENTO DA AMOSTRA A ---
+        df_a = df[[COL_RAIO_A, COL_CONT_A]].dropna()
+        raios_a = df_a[COL_RAIO_A].astype(str).str.replace(',', '.').astype(float).values
+        contagens_a = df_a[COL_CONT_A].astype(int).values
+        
+        # NORMALIZAÇÃO: Criando a probabilidade (Frequência Relativa)
+        probs_a = contagens_a / np.sum(contagens_a)
+        
+        # Expansão para o teste K-S (necessário para o cálculo correto do p-valor)
+        amostra_1_expandida = np.repeat(raios_a, contagens_a)
+        
+        # --- PROCESSAMENTO DA AMOSTRA B ---
+        df_b = df[[COL_RAIO_B, COL_CONT_B]].dropna()
+        raios_b = df_b[COL_RAIO_B].astype(str).str.replace(',', '.').astype(float).values
+        contagens_b = df_b[COL_CONT_B].astype(int).values
+        
+        # NORMALIZAÇÃO: Criando a probabilidade (Frequência Relativa)
+        probs_b = contagens_b / np.sum(contagens_b)
+        
+        amostra_2_expandida = np.repeat(raios_b, contagens_b)
+        
+        return (raios_a, probs_a, amostra_1_expandida), (raios_b, probs_b, amostra_2_expandida)
+        
+    except FileNotFoundError:
+        print(f"\n[ERRO] O arquivo '{caminho_csv}' não foi encontrado!")
+        exit()
+    except Exception as e:
+        print(f"\n[ERRO] Falha ao processar o arquivo. Motivo: {str(e)}")
+        exit()
+
+# ==============================================================================
+# 2. FUNÇÃO AUXILIAR PARA A FUNÇÃO ACUMULADA (ECDF)
+# ==============================================================================
+def calcular_ecdf(dados):
+    """Calcula as coordenadas X e Y (Probabilidade Acumulada de 0 a 1)"""
+    x = np.sort(dados)
+    y = np.arange(1, len(x) + 1) / len(x)
+    return x, y
+
+# ==============================================================================
+# 3. PIPELINE PRINCIPAL: TESTE K-S E GRÁFICOS DUPLOS
+# ==============================================================================
+def executar_teste_ks_granulometria():
+    print("=" * 70)
+    print("TESTE DE KOLMOGOROV-SMIRNOV: GRANULOMETRIA NORMALIZADA")
+    print("=" * 70)
+    
+    # Carregar dados brutos, normalizados e expandidos
+    dados_A, dados_B = carregar_dados_agrupados(ARQUIVO_CSV)
+    raios_A, probs_A, amos_A_exp = dados_A
+    raios_B, probs_B, amos_B_exp = dados_B
+    
+    print(f"-> Amostra 1: {len(amos_A_exp)} grãos (Normalizados para Soma = {np.sum(probs_A):.1f})")
+    print(f"-> Amostra 2: {len(amos_B_exp)} grãos (Normalizados para Soma = {np.sum(probs_B):.1f})")
+    
+    # ---------------------------------------------------------
+    # TESTE K-S (Atua sobre a probabilidade acumulada ECDF)
+    # ---------------------------------------------------------
+    estatistica_d, p_valor = ks_2samp(amos_A_exp, amos_B_exp)
+    
+    print("\n[RESULTADOS ESTATÍSTICOS]")
+    print(f"Estatística D (Distância Máx na Acumulada): {estatistica_d:.4f}")
+    print(f"Valor-p: {p_valor:.10e}") 
+    
+    # ---------------------------------------------------------
+    # GERAÇÃO DOS GRÁFICOS: PROBABILIDADE VS ACUMULADA
+    # ---------------------------------------------------------
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # PAINEL 1: Distribuição de Probabilidade (A normalização pedida)
+    largura_barra = 0.05
+    ax1.bar(raios_A - largura_barra/2, probs_A, width=largura_barra, alpha=0.7, label='Amostra 1', color='#3498db')
+    ax1.bar(raios_B + largura_barra/2, probs_B, width=largura_barra, alpha=0.7, label='Amostra 2', color='#e74c3c')
+    
+    ax1.set_title("1. Distribuição de Probabilidade Normalizada", fontsize=12, fontweight='bold')
+    ax1.set_xlabel("Raio Equivalente do Grão (mm)")
+    ax1.set_ylabel("Probabilidade Relativa (0 a 1)")
+    ax1.grid(True, linestyle='--', alpha=0.4)
+    ax1.legend()
+    
+    # PAINEL 2: Teste K-S (Probabilidade Acumulada - ECDF)
+    x_A, y_A = calcular_ecdf(amos_A_exp)
+    x_B, y_B = calcular_ecdf(amos_B_exp)
+    
+    ax2.step(x_A, y_A, where='post', label='Amostra 1', color='#3498db', linewidth=2.5)
+    ax2.step(x_B, y_B, where='post', label='Amostra 2', color='#e74c3c', linewidth=2.5)
+    
+    ax2.set_title("2. Teste K-S: Probabilidade Acumulada (ECDF)", fontsize=12, fontweight='bold')
+    ax2.set_xlabel("Raio Equivalente do Grão (mm)")
+    ax2.set_ylabel("Probabilidade Acumulada (0 a 1)")
+    ax2.grid(True, linestyle='--', alpha=0.4)
+    
+    # Caixa de texto com o resultado
+    texto_resumo = f"Estatística D: {estatistica_d:.3f}\nValor-p: {p_valor:.3e}"
+    ax2.text(0.05, 0.85, texto_resumo, transform=ax2.transAxes, fontsize=11,
+             bbox=dict(facecolor='white', alpha=0.9, edgecolor='gray', boxstyle='round,pad=0.5'))
+    ax2.legend(loc='lower right')
+    
+    plt.tight_layout()
+    plt.savefig("analise_completa_granulometria.png", dpi=200)
+    print("\n[INFO] Gráfico duplo salvo como 'analise_completa_granulometria.png'.")
+    plt.show()
+
+if __name__ == '__main__':
+    executar_teste_ks_granulometria()
