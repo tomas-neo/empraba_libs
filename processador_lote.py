@@ -111,11 +111,11 @@ def identificar_picos_npk(comprimentos_onda, intensidades, tolerancia=PEAK_TOLER
                 if diff <= tolerancia and diff < menor_diff:
                     menor_diff, melhor_elemento, linha_ref = diff, elemento, linha
                     
-		if melhor_elemento:
-		            picos_identificados.append({
-		                'index': idx, 'elemento': melhor_elemento, 'w_medido': w_pico,
-		                'w_referencia': linha_ref, 'intensidade': i_pico, 'desvio': menor_diff
-		            })
+        if melhor_elemento:
+                    picos_identificados.append({
+                        'index': idx, 'elemento': melhor_elemento, 'w_medido': w_pico,
+                        'w_referencia': linha_ref, 'intensidade': i_pico, 'desvio': menor_diff
+                    })
             
     return picos_identificados, picos_idx
 
