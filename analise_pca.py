@@ -11,17 +11,37 @@ def executar_pca_libs():
     print("INICIANDO ANÁLISE DE COMPONENTES PRINCIPAIS (PCA)")
     print("=" * 70)
 
+    # ---------------------------------------------------------
+    # MENU INTERATIVO PARA ESCOLHA DO DETECTOR
+    # ---------------------------------------------------------
+    print("\nQual detector você deseja usar para construir esta PCA?")
+    print("[1] VIS (Visível)")
+    print("[2] UV (Ultravioleta)")
+    
+    escolha = input("\nDigite 1 ou 2 e aperte Enter: ").strip()
+    
+    if escolha == '1':
+        detector_escolhido = "VIS"
+    elif escolha == '2':
+        detector_escolhido = "UV"
+    else:
+        print("\n[ERRO] Opção inválida. Execute o script novamente e digite apenas 1 ou 2.")
+        return
+        
+    print(f"\n=> Excelente! Filtrando apenas os dados do detector {detector_escolhido}...\n")
+    # ---------------------------------------------------------
+
     # Define a pasta onde estão os arquivos processados
     pasta_resultados = Path("RESULTADOS_LIBS")
     
-    # Busca todos os arquivos que terminam com '_processado.csv'
-    arquivos_csv = list(pasta_resultados.rglob("*_processado.csv"))
+    # Busca os arquivos ignorando o backup e filtrando exatamente pela escolha do usuário
+    arquivos_csv = [f for f in pasta_resultados.rglob("*_processado.csv") if "backup" not in f.parts and detector_escolhido in f.parts]
     
     if not arquivos_csv:
-        print("[ERRO] Nenhum arquivo processado encontrado. Verifique as pastas.")
+        print(f"[ERRO] Nenhum arquivo processado encontrado para o detector {detector_escolhido}. Verifique as pastas.")
         return
 
-    print(f"Encontrados {len(arquivos_csv)} espectros para a matriz da PCA.")
+    print(f"Encontrados {len(arquivos_csv)} espectros para a matriz da PCA ({detector_escolhido}).")
 
     matriz_X = []
     labels_amostras = []
@@ -62,13 +82,12 @@ def executar_pca_libs():
     labels_amostras = np.array(labels_amostras)
 
     # 3. Pré-processamento Quimiométrico (Padronização / Auto-scaling)
-    # A padronização garante que picos muito altos não esmaguem picos menores de nutrientes importantes
     scaler = StandardScaler()
     X_escalonado = scaler.fit_transform(matriz_X)
 
     # 4. Cálculo da PCA
-    print("\nCalculando as Componentes Principais...")
-    pca = PCA(n_components=2) # Queremos apenas PC1 e PC2 para o gráfico 2D
+    print("Calculando as Componentes Principais...")
+    pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X_escalonado)
     
     # Porcentagem de variância explicada por cada componente
@@ -100,7 +119,8 @@ def executar_pca_libs():
     plt.axhline(0, color='gray', linestyle='--', linewidth=1)
     plt.axvline(0, color='gray', linestyle='--', linewidth=1)
 
-    plt.title('PCA - Gráfico de Escores (Fertilizantes NPK)', fontsize=14, fontweight='bold')
+    # Título dinâmico que muda dependendo se é UV ou VIS
+    plt.title(f'PCA - Gráfico de Escores (Fertilizantes NPK) - Detector {detector_escolhido}', fontsize=14, fontweight='bold')
     plt.xlabel(f'PC1 ({var_pc1:.1f}% da variância)', fontsize=12)
     plt.ylabel(f'PC2 ({var_pc2:.1f}% da variância)', fontsize=12)
     plt.legend(title='Formulação / Marca', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -108,8 +128,8 @@ def executar_pca_libs():
     
     plt.tight_layout()
     
-    # Salva o gráfico na raiz
-    nome_grafico = "PCA_Scores_Plot.png"
+    # Salva o gráfico com um nome dinâmico para não subscrever arquivos
+    nome_grafico = f"PCA_Scores_Plot_{detector_escolhido}.png"
     plt.savefig(nome_grafico, dpi=300, bbox_inches='tight')
     print(f"\n[SUCESSO] Gráfico da PCA gerado e salvo como '{nome_grafico}'!")
     plt.show()
