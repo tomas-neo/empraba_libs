@@ -31,33 +31,43 @@ def executar_pca_libs():
     print(f"\n=> Excelente! Filtrando apenas os dados do detector {detector_escolhido}...\n")
     # ---------------------------------------------------------
 
-    # Define a pasta onde estão os arquivos processados
     pasta_resultados = Path("RESULTADOS_LIBS")
     
-    # Busca os arquivos ignorando o backup e filtrando exatamente pela escolha do usuário
-    arquivos_csv = [f for f in pasta_resultados.rglob("*_processado.csv") if "backup" not in str(f).lower() and detector_escolhido.lower() in str(f).lower()]
+    # BUSCA ROBUSTA: Verifica se a pasta se chama EXATAMENTE "uv" ou "vis" 
+    arquivos_csv = [
+        f for f in pasta_resultados.rglob("*_processado.csv") 
+        if "backup" not in str(f).lower() 
+        and any(detector_escolhido.lower() == pasta.lower() for pasta in f.parts)
+    ]
     
     if not arquivos_csv:
-        print(f"[ERRO] Nenhum arquivo processado encontrado para o detector {detector_escolhido}. Verifique as pastas.")
+        print(f"[ERRO] Nenhum arquivo processado encontrado para o detector {detector_escolhido}.")
         return
 
-    print(f"Encontrados {len(arquivos_csv)} espectros para a matriz da PCA ({detector_escolhido}).")
+    print(f"Encontrados {len(arquivos_csv)} arquivos potenciais para o detector {detector_escolhido}.")
 
     matriz_X = []
     labels_amostras = []
+    tamanho_padrao = None # Variável escudo para travar o tamanho
 
-    # 1. Montagem da Matriz de Dados
+    # 1. Montagem da Matriz de Dados (Com Proteção)
     for arquivo in arquivos_csv:
         df = pd.read_csv(arquivo)
-        
-        # Extrai apenas a coluna da intensidade já pré-processada (área normalizada, sem baseline)
         espectro = df['intensidade_pre_processada'].values
+        
+        # Define a régua de tamanho baseada no primeiro arquivo que entrar
+        if tamanho_padrao is None:
+            tamanho_padrao = len(espectro)
+            
+        # O ESCUDO: Se o tamanho for diferente, ignora silenciosamente o arquivo impostor
+        if len(espectro) != tamanho_padrao:
+            continue
+            
         matriz_X.append(espectro)
         
-        # 2. Extração Automática de Rótulos (Labels) a partir do caminho do arquivo
+        # 2. Extração Automática de Rótulos (Labels)
         caminho_texto = str(arquivo).lower()
         
-        # Identifica a Marca
         if "maxgreen" in caminho_texto:
             marca = "MaxGreen"
         elif "plantfertil" in caminho_texto:
@@ -65,7 +75,6 @@ def executar_pca_libs():
         else:
             marca = "Desconhecida"
             
-        # Identifica a Formulação NPK
         if "10-10-10" in caminho_texto:
             formula = "10-10-10"
         elif "4-14-8" in caminho_texto:
@@ -73,15 +82,16 @@ def executar_pca_libs():
         else:
             formula = ""
             
-        # Cria o rótulo final (Ex: "MaxGreen 10-10-10")
         rotulo_final = f"{marca} {formula}".strip()
         labels_amostras.append(rotulo_final)
 
-    # Converte listas para arrays do NumPy (formato exigido pelo scikit-learn)
+    # Converte listas para arrays
     matriz_X = np.array(matriz_X)
     labels_amostras = np.array(labels_amostras)
+    
+    print(f"Matriz validada com sucesso! Analisando {len(matriz_X)} espectros homogêneos.")
 
-    # 3. Pré-processamento Quimiométrico (Padronização / Auto-scaling)
+    # 3. Pré-processamento Quimiométrico
     scaler = StandardScaler()
     X_escalonado = scaler.fit_transform(matriz_X)
 
@@ -90,21 +100,18 @@ def executar_pca_libs():
     pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X_escalonado)
     
-    # Porcentagem de variância explicada por cada componente
     var_pc1 = pca.explained_variance_ratio_[0] * 100
     var_pc2 = pca.explained_variance_ratio_[1] * 100
 
-    # 5. Construção do Gráfico de Escores (Scores Plot)
+    # 5. Construção do Gráfico
     plt.figure(figsize=(10, 7))
     
-    # Criamos um DataFrame temporário só para facilitar o plot com o Seaborn
     df_pca = pd.DataFrame({
         'PC1': X_pca[:, 0],
         'PC2': X_pca[:, 1],
         'Amostra': labels_amostras
     })
 
-    # Paleta de cores contrastantes para separar bem os clusters
     sns.scatterplot(
         x='PC1', y='PC2', 
         hue='Amostra', 
@@ -115,11 +122,9 @@ def executar_pca_libs():
         edgecolor='black'
     )
 
-    # Linhas de eixo cruzando no zero (Padrão Quimiométrico)
     plt.axhline(0, color='gray', linestyle='--', linewidth=1)
     plt.axvline(0, color='gray', linestyle='--', linewidth=1)
 
-    # Título dinâmico que muda dependendo se é UV ou VIS
     plt.title(f'PCA - Gráfico de Escores (Fertilizantes NPK) - Detector {detector_escolhido}', fontsize=14, fontweight='bold')
     plt.xlabel(f'PC1 ({var_pc1:.1f}% da variância)', fontsize=12)
     plt.ylabel(f'PC2 ({var_pc2:.1f}% da variância)', fontsize=12)
@@ -128,7 +133,6 @@ def executar_pca_libs():
     
     plt.tight_layout()
     
-    # Salva o gráfico com um nome dinâmico para não subscrever arquivos
     nome_grafico = f"PCA_Scores_Plot_{detector_escolhido}.png"
     plt.savefig(nome_grafico, dpi=300, bbox_inches='tight')
     print(f"\n[SUCESSO] Gráfico da PCA gerado e salvo como '{nome_grafico}'!")
