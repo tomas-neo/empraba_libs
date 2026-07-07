@@ -35,7 +35,7 @@ def executar_pca_libs():
     pasta_resultados = Path("RESULTADOS_LIBS")
     
     # Busca os arquivos ignorando o backup e filtrando exatamente pela escolha do usuário
-    arquivos_csv = [f for f in pasta_resultados.rglob("*_processado.csv") if "backup" not in f.parts and detector_escolhido in f.parts]
+    arquivos_csv = [f for f in pasta_resultados.rglob("*_processado.csv") if "backup" not in str(f).lower() and detector_escolhido.lower() in str(f).lower()]
     
     if not arquivos_csv:
         print(f"[ERRO] Nenhum arquivo processado encontrado para o detector {detector_escolhido}. Verifique as pastas.")
