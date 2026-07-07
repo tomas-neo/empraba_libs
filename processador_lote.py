@@ -132,7 +132,7 @@ def processar_espectros_libs_em_lote():
     pasta_resultados = pasta_raiz / "RESULTADOS_LIBS"
     
     # Localiza todos os arquivos .esf nas subpastas, ignorando a pasta de saída
-    arquivos_esf = [f for f in pasta_raiz.rglob("*.esf") if "RESULTADOS_LIBS" not in f.parts]
+    arquivos_esf = [f for f in pasta_raiz.rglob("*.esf") if "RESULTADOS_LIBS" not in f.parts and "backup" not in f.parts]
     
     if not arquivos_esf:
         print("[AVISO] Nenhum arquivo .esf encontrado nas subpastas.")
