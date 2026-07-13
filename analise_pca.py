@@ -5,10 +5,11 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 import seaborn as sns
+from scipy import stats # <-- Nova ferramenta para detectar os outliers matematicamente
 
 def executar_pca_libs():
     print("=" * 70)
-    print("INICIANDO ANÁLISE DE COMPONENTES PRINCIPAIS (PCA)")
+    print("INICIANDO ANÁLISE DE COMPONENTES PRINCIPAIS (PCA) COM FILTRO")
     print("=" * 70)
 
     # ---------------------------------------------------------
@@ -28,12 +29,11 @@ def executar_pca_libs():
         print("\n[ERRO] Opção inválida. Execute o script novamente e digite apenas 1 ou 2.")
         return
         
-    print(f"\n=> Excelente! Filtrando apenas os dados do detector {detector_escolhido}...\n")
-    # ---------------------------------------------------------
+    print(f"\n=> Filtrando apenas os dados do detector {detector_escolhido}...\n")
 
     pasta_resultados = Path("RESULTADOS_LIBS")
     
-    # BUSCA ROBUSTA: Verifica se a pasta se chama EXATAMENTE "uv" ou "vis" 
+    # BUSCA ROBUSTA COM BLINDAGEM
     arquivos_csv = [
         f for f in pasta_resultados.rglob("*_processado.csv") 
         if "backup" not in str(f).lower() 
@@ -44,28 +44,24 @@ def executar_pca_libs():
         print(f"[ERRO] Nenhum arquivo processado encontrado para o detector {detector_escolhido}.")
         return
 
-    print(f"Encontrados {len(arquivos_csv)} arquivos potenciais para o detector {detector_escolhido}.")
-
     matriz_X = []
     labels_amostras = []
-    tamanho_padrao = None # Variável escudo para travar o tamanho
+    tamanho_padrao = None
 
-    # 1. Montagem da Matriz de Dados (Com Proteção)
+    # 1. Montagem da Matriz de Dados
     for arquivo in arquivos_csv:
         df = pd.read_csv(arquivo)
         espectro = df['intensidade_pre_processada'].values
         
-        # Define a régua de tamanho baseada no primeiro arquivo que entrar
         if tamanho_padrao is None:
             tamanho_padrao = len(espectro)
             
-        # O ESCUDO: Se o tamanho for diferente, ignora silenciosamente o arquivo impostor
         if len(espectro) != tamanho_padrao:
             continue
             
         matriz_X.append(espectro)
         
-        # 2. Extração Automática de Rótulos (Labels)
+        # Extração de Rótulos (Labels)
         caminho_texto = str(arquivo).lower()
         
         if "maxgreen" in caminho_texto:
@@ -85,31 +81,54 @@ def executar_pca_libs():
         rotulo_final = f"{marca} {formula}".strip()
         labels_amostras.append(rotulo_final)
 
-    # Converte listas para arrays
     matriz_X = np.array(matriz_X)
     labels_amostras = np.array(labels_amostras)
     
-    print(f"Matriz validada com sucesso! Analisando {len(matriz_X)} espectros homogêneos.")
+    print(f"Matriz validada! Analisando {len(matriz_X)} espectros iniciais.")
 
-    # 3. Pré-processamento Quimiométrico
-    scaler = StandardScaler()
-    X_escalonado = scaler.fit_transform(matriz_X)
+    # ---------------------------------------------------------
+    # 2. FILTRAGEM DE OUTLIERS (A Mágica Nova)
+    # ---------------------------------------------------------
+    # Fazemos uma PCA preliminar apenas para descobrir quem está fora da curva
+    scaler_ini = StandardScaler()
+    X_esc_ini = scaler_ini.fit_transform(matriz_X)
+    pca_ini = PCA(n_components=2)
+    X_pca_ini = pca_ini.fit_transform(X_esc_ini)
 
-    # 4. Cálculo da PCA
-    print("Calculando as Componentes Principais...")
-    pca = PCA(n_components=2)
-    X_pca = pca.fit_transform(X_escalonado)
+    # Calcula a distância (Z-score) de cada ponto
+    z_scores = np.abs(stats.zscore(X_pca_ini))
     
-    var_pc1 = pca.explained_variance_ratio_[0] * 100
-    var_pc2 = pca.explained_variance_ratio_[1] * 100
+    # Mantém apenas os espectros que estão a menos de 3 desvios padrões do centro
+    # (Ou seja, expulsa os outliers absurdos)
+    mascara_limpa = (z_scores < 3).all(axis=1)
 
-    # 5. Construção do Gráfico
+    matriz_X_limpa = matriz_X[mascara_limpa]
+    labels_amostras_limpos = labels_amostras[mascara_limpa]
+    
+    outliers_removidos = len(matriz_X) - len(matriz_X_limpa)
+    print(f"-> FAXINA CONCLUÍDA: {outliers_removidos} 'tiros ruins' (outliers) foram expulsos da matriz!")
+    print(f"-> Sobraram {len(matriz_X_limpa)} espectros confiáveis para o gráfico final.\n")
+
+    # ---------------------------------------------------------
+    # 3. PCA DEFINITIVA (Com os dados limpos)
+    # ---------------------------------------------------------
+    scaler_final = StandardScaler()
+    X_escalonado_final = scaler_final.fit_transform(matriz_X_limpa)
+
+    print("Calculando as Componentes Principais Definitivas...")
+    pca_final = PCA(n_components=2)
+    X_pca_final = pca_final.fit_transform(X_escalonado_final)
+    
+    var_pc1 = pca_final.explained_variance_ratio_[0] * 100
+    var_pc2 = pca_final.explained_variance_ratio_[1] * 100
+
+    # 4. Construção do Gráfico
     plt.figure(figsize=(10, 7))
     
     df_pca = pd.DataFrame({
-        'PC1': X_pca[:, 0],
-        'PC2': X_pca[:, 1],
-        'Amostra': labels_amostras
+        'PC1': X_pca_final[:, 0],
+        'PC2': X_pca_final[:, 1],
+        'Amostra': labels_amostras_limpos
     })
 
     sns.scatterplot(
@@ -125,7 +144,7 @@ def executar_pca_libs():
     plt.axhline(0, color='gray', linestyle='--', linewidth=1)
     plt.axvline(0, color='gray', linestyle='--', linewidth=1)
 
-    plt.title(f'PCA - Gráfico de Escores (Fertilizantes NPK) - Detector {detector_escolhido}', fontsize=14, fontweight='bold')
+    plt.title(f'PCA - Gráfico de Escores Filtrado (Fertilizantes NPK) - Detector {detector_escolhido}', fontsize=14, fontweight='bold')
     plt.xlabel(f'PC1 ({var_pc1:.1f}% da variância)', fontsize=12)
     plt.ylabel(f'PC2 ({var_pc2:.1f}% da variância)', fontsize=12)
     plt.legend(title='Formulação / Marca', bbox_to_anchor=(1.05, 1), loc='upper left')
@@ -133,9 +152,9 @@ def executar_pca_libs():
     
     plt.tight_layout()
     
-    nome_grafico = f"PCA_Scores_Plot_{detector_escolhido}.png"
+    nome_grafico = f"PCA_Scores_Plot_{detector_escolhido}_Filtrado.png"
     plt.savefig(nome_grafico, dpi=300, bbox_inches='tight')
-    print(f"\n[SUCESSO] Gráfico da PCA gerado e salvo como '{nome_grafico}'!")
+    print(f"[SUCESSO] Gráfico da PCA limpo gerado e salvo como '{nome_grafico}'!")
     plt.show()
 
 if __name__ == '__main__':
