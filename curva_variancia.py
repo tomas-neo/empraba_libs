@@ -94,15 +94,8 @@ def plotar_curva_variancia():
     plt.ylim(0, 105)
     plt.tight_layout()
     
-    # ---------------------------------------------------------
-    # CRIAÇÃO AUTOMÁTICA DA PASTA DE DESTINO
-    # ---------------------------------------------------------
-    pasta_destino = Path("Curvas_de_Variancia")
-    pasta_destino.mkdir(exist_ok=True) # Cria a pasta se ela não existir
     
-    nome_grafico = pasta_destino / f"Curva_Variancia_{detector_escolhido}.png"
-    plt.savefig(nome_grafico, dpi=300, bbox_inches='tight')
-    print(f"\n[SUCESSO] Gráfico gerado e salvo em: {nome_grafico}")
+    print(f"\n[SUCESSO]")
     plt.show()
 
 if __name__ == '__main__':

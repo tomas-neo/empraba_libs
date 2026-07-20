@@ -5,7 +5,6 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from pathlib import Path
 import seaborn as sns
-from scipy import stats
 
 def identificar_e_plotar_outliers():
     print("=" * 70)
@@ -82,18 +81,25 @@ def identificar_e_plotar_outliers():
     
     print(f"Matriz validada! Analisando {len(matriz_X)} espectros em busca de anomalias.\n")
 
-    # PCA Bruta e Cálculo de Outliers
+    # PCA Bruta e Cálculo Inicial
     scaler = StandardScaler()
     X_escalonado = scaler.fit_transform(matriz_X)
 
     pca = PCA(n_components=2)
     X_pca = pca.fit_transform(X_escalonado)
-    
-    var_pc1 = pca.explained_variance_ratio_[0] * 100
-    var_pc2 = pca.explained_variance_ratio_[1] * 100
 
-    z_scores = np.abs(stats.zscore(X_pca))
-    outlier_mask = (z_scores >= 3).any(axis=1)
+    # =================================================================
+    # NOVA DETECÇÃO DE OUTLIERS: MÉTODO ROBUSTO IQR (Substituiu o Z-Score)
+    # =================================================================
+    Q1 = np.percentile(X_pca, 25, axis=0)
+    Q3 = np.percentile(X_pca, 75, axis=0)
+    IQR = Q3 - Q1
+    
+    lim_inferior = Q1 - 1.5 * IQR
+    lim_superior = Q3 + 1.5 * IQR
+    
+    # Marca como outlier quem estourar o limite na PC1 OU na PC2
+    outlier_mask = ((X_pca < lim_inferior) | (X_pca > lim_superior)).any(axis=1)
     
     # Dedurando no Terminal
     print("!" * 50)
@@ -102,63 +108,66 @@ def identificar_e_plotar_outliers():
     
     total_outliers = np.sum(outlier_mask)
     if total_outliers == 0:
-        print("Nenhum outlier encontrado! Todos os dados estão coesos.")
+        print("Nenhum outlier encontrado! Todos os dados estão coesos segundo o IQR.")
     else:
         print(f"Foram encontrados {total_outliers} espectros anômalos:\n")
         for i, is_outlier in enumerate(outlier_mask):
             if is_outlier:
-                z_max = max(z_scores[i])
                 print(f"-> Arquivo: {nomes_arquivos[i]}")
-                print(f"   Marca: {labels_amostras[i]} | Distância Z-Score: {z_max:.2f}\n")
+                print(f"   Marca: {labels_amostras[i]} | Status: Ultrapassou limites do IQR\n")
 
-    # Construção do Gráfico
-    plt.figure(figsize=(10, 7))
-    status_pontos = ['Outlier' if out else 'Normal' for out in outlier_mask]
+    # =================================================================
+    # CORREÇÃO: FILTRAGEM E RECÁLCULO DO PCA (SEM OS OUTLIERS)
+    # =================================================================
     
-    df_pca = pd.DataFrame({
-        'PC1': X_pca[:, 0],
-        'PC2': X_pca[:, 1],
-        'Amostra': labels_amostras,
-        'Status': status_pontos
+    # Filtramos a matriz e os rótulos originais para manter apenas os normais
+    # O operador ~ inverte a máscara booleana
+    X_limpo = matriz_X[~outlier_mask]
+    labels_limpos = labels_amostras[~outlier_mask]
+    
+    print(f"\n=> Recalculando o PCA apenas com os {len(X_limpo)} espectros válidos...")
+
+    # Refazemos o escalonamento e o PCA do zero com os dados limpos
+    X_limpo_escalonado = scaler.fit_transform(X_limpo)
+    pca_limpo = PCA(n_components=2)
+    X_pca_limpo = pca_limpo.fit_transform(X_limpo_escalonado)
+    
+    var_pc1_limpo = pca_limpo.explained_variance_ratio_[0] * 100
+    var_pc2_limpo = pca_limpo.explained_variance_ratio_[1] * 100
+
+    # =================================================================
+    # CONSTRUÇÃO DO GRÁFICO LIMPO
+    # =================================================================
+    plt.figure(figsize=(10, 7))
+    
+    df_pca_limpo = pd.DataFrame({
+        'PC1': X_pca_limpo[:, 0],
+        'PC2': X_pca_limpo[:, 1],
+        'Amostra': labels_limpos
     })
 
     sns.scatterplot(
         x='PC1', y='PC2', 
         hue='Amostra', 
         palette='Set1', 
-        data=df_pca[df_pca['Status'] == 'Normal'], 
+        data=df_pca_limpo, 
         s=100, 
         alpha=0.8, 
         edgecolor='black'
     )
-    
-    if total_outliers > 0:
-        sns.scatterplot(
-            x='PC1', y='PC2', 
-            data=df_pca[df_pca['Status'] == 'Outlier'], 
-            s=200, marker='X', color='red', edgecolor='black',
-            label='Outliers Detectados'
-        )
 
     plt.axhline(0, color='gray', linestyle='--', linewidth=1)
     plt.axvline(0, color='gray', linestyle='--', linewidth=1)
 
-    plt.title(f'PCA - Detecção de Outliers (Fertilizantes NPK) - Detector {detector_escolhido}', fontsize=14, fontweight='bold')
-    plt.xlabel(f'PC1 ({var_pc1:.1f}% da variância)', fontsize=12)
-    plt.ylabel(f'PC2 ({var_pc2:.1f}% da variância)', fontsize=12)
+    plt.title(f'PCA Limpo - Sem Outliers (Fertilizantes NPK) - Detector {detector_escolhido}', fontsize=14, fontweight='bold')
+    plt.xlabel(f'PC1 ({var_pc1_limpo:.1f}% da variância)', fontsize=12)
+    plt.ylabel(f'PC2 ({var_pc2_limpo:.1f}% da variância)', fontsize=12)
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.tight_layout()
     
-    # ---------------------------------------------------------
-    # CRIAÇÃO AUTOMÁTICA DA PASTA DE DESTINO
-    # ---------------------------------------------------------
-    pasta_destino = Path("PCA_Com_Outliers")
-    pasta_destino.mkdir(exist_ok=True) # Cria a pasta se ela não existir
-    
-    nome_grafico = pasta_destino / f"PCA_Outliers_Destacados_{detector_escolhido}.png"
-    plt.savefig(nome_grafico, dpi=300, bbox_inches='tight')
-    print(f"\n[SUCESSO] Gráfico salvo em: {nome_grafico}")
+
+    print(f"\n[SUCESSO]")
     plt.show()
 
 if __name__ == '__main__':

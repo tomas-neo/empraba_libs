@@ -24,8 +24,9 @@ PEAK_PROMINENCE_FRAC = 0.02
 PEAK_TOLERANCE = 0.6   
 
 # ==============================================================================
-# FUNÇÃO DE LEITURA ADAPTATIVA
+# FUNÇÃO DE LEITURA ADAPTATIVA (CORRIGIDA)
 # ==============================================================================
+
 def carregar_arquivo_esf(caminho_arquivo):
     encodings = ['utf-8', 'utf-16', 'latin-1']
     for enc in encodings:
@@ -60,9 +61,16 @@ def carregar_arquivo_esf(caminho_arquivo):
                         continue 
             
             if len(dados_num) > 0:
-                dados_num = np.array(dados_num)
-                dados_num = dados_num[dados_num[:, 0].argsort()]
-                return dados_num[:, 0], dados_num[:, 1]
+                # --- INÍCIO DA CORREÇÃO ---
+                # Transforma a lista em um DataFrame do Pandas para facilitar a manipulação
+                df = pd.DataFrame(dados_num, columns=['lambda', 'intensidade'])
+                
+                # Agrupa os comprimentos de onda repetidos e tira a média das intensidades.
+                # O groupby também já se encarrega de deixar a coluna 'lambda' ordenada do menor para o maior.
+                df_processado = df.groupby('lambda', as_index=False).mean()
+                
+                return df_processado['lambda'].values, df_processado['intensidade'].values
+                # --- FIM DA CORREÇÃO ---
                 
         except Exception:
             continue

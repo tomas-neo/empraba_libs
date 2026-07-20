@@ -152,9 +152,7 @@ def executar_pca_libs():
     
     plt.tight_layout()
     
-    nome_grafico = f"PCA_Scores_Plot_{detector_escolhido}_Filtrado.png"
-    plt.savefig(nome_grafico, dpi=300, bbox_inches='tight')
-    print(f"[SUCESSO] Gráfico da PCA limpo gerado e salvo como '{nome_grafico}'!")
+    print(f"[SUCESSO]!")
     plt.show()
 
 if __name__ == '__main__':
