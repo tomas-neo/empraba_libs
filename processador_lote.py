@@ -24,58 +24,56 @@ PEAK_PROMINENCE_FRAC = 0.02
 PEAK_TOLERANCE = 0.6   
 
 # ==============================================================================
-# FUNÇÃO DE LEITURA ADAPTATIVA (CORRIGIDA)
+# FUNÇÃO DE LEITURA ADAPTATIVA (ESPECÍFICA PARA ANDOR ARYELLE)
 # ==============================================================================
-
 def carregar_arquivo_esf(caminho_arquivo):
-    encodings = ['utf-8', 'utf-16', 'latin-1']
-    for enc in encodings:
-        try:
-            with open(caminho_arquivo, 'r', encoding=enc, errors='ignore') as f:
-                linhas = f.readlines()
+    """
+    Lê arquivos .esf do espectrômetro Andor Aryelle, pula o cabeçalho e 
+    extrai os dados da seção [data section].
+    """
+    dados_num = []
+    iniciou_dados = False
+    
+    with open(caminho_arquivo, 'r', encoding='utf-8', errors='ignore') as f:
+        for linha in f:
+            linha = linha.strip()
             
-            if not linhas: continue
+            # Pula o cabeçalho até achar a flag de início
+            if not iniciou_dados:
+                if linha == '[data section]':
+                    iniciou_dados = True
+                continue
                 
-            dados_num = []
-            for linha in linhas:
-                linha_txt = linha.strip()
-                if not linha_txt: continue
+            if not linha: 
+                continue
                 
-                if '\t' in linha_txt: partes = linha_txt.split('\t')
-                elif ';' in linha_txt: partes = linha_txt.split(';')
-                else: partes = linha_txt.split()
-                
-                if len(partes) >= 2:
-                    try:
-                        p_limpos = [p.strip().replace(',', '.') for p in partes]
-                        valores = [float(p) for p in p_limpos if p]
-                        
-                        if len(valores) >= 3:
-                            if valores[0] < 25000 and 180 <= valores[1] <= 1100:
-                                dados_num.append([valores[1], valores[2]]) 
-                            else:
-                                dados_num.append([valores[0], valores[1]])
-                        elif len(valores) == 2:
-                            dados_num.append([valores[0], valores[1]])
-                    except ValueError:
-                        continue 
+            # O Andor usa ponto e vírgula como separador
+            partes = linha.split(';')
             
-            if len(dados_num) > 0:
-                # --- INÍCIO DA CORREÇÃO ---
-                # Transforma a lista em um DataFrame do Pandas para facilitar a manipulação
-                df = pd.DataFrame(dados_num, columns=['lambda', 'intensidade'])
-                
-                # Agrupa os comprimentos de onda repetidos e tira a média das intensidades.
-                # O groupby também já se encarrega de deixar a coluna 'lambda' ordenada do menor para o maior.
-                df_processado = df.groupby('lambda', as_index=False).mean()
-                
-                return df_processado['lambda'].values, df_processado['intensidade'].values
-                # --- FIM DA CORREÇÃO ---
-                
-        except Exception:
-            continue
+            # Verifica se tem as colunas necessárias (Wavelength, Pixel, Intensity, Order)
+            if len(partes) >= 3:
+                try:
+                    # Coluna 0: Wavelength (nm) | Coluna 2: Intensidade Bruta
+                    wave = float(partes[0].replace(',', '.'))
+                    intensity = float(partes[2].replace(',', '.'))
+                    
+                    # Filtra ruídos extremos do sensor (opcional, ajustável)
+                    if wave > 0: 
+                        dados_num.append([wave, intensity])
+                except ValueError:
+                    continue 
             
-    raise ValueError("Não foi possível extrair duas colunas numéricas válidas do arquivo.")
+    if len(dados_num) > 0:
+        # Transforma a lista em DataFrame
+        df = pd.DataFrame(dados_num, columns=['lambda', 'intensidade'])
+        
+        # Agrupa comprimentos de onda repetidos (comum em echelles nas bordas das ordens)
+        # O groupby tira a média das intensidades e já ORDENA o eixo X!
+        df_processado = df.groupby('lambda', as_index=False).mean()
+        
+        return df_processado['lambda'].values, df_processado['intensidade'].values
+        
+    raise ValueError("Não foi possível extrair dados válidos da seção [data section].")
 
 # ==============================================================================
 # FUNÇÕES DE PROCESSAMENTO MATEMÁTICO
@@ -135,11 +133,11 @@ def processar_espectros_libs_em_lote():
     print("INICIANDO PROCESSAMENTO AUTOMATIZADO COM ESPELHAMENTO DE DIRETÓRIOS")
     print("=" * 70)
     
-    # '.' aponta para a pasta EMBRAPA onde o script está sendo executado
+    # '.' aponta para a pasta onde o script está sendo executado
     pasta_raiz = Path(".")
     pasta_resultados = pasta_raiz / "RESULTADOS_LIBS"
     
-    # Localiza todos os arquivos .esf nas subpastas, ignorando a pasta de saída
+    # Localiza todos os arquivos .esf nas subpastas, ignorando pastas de saída
     arquivos_esf = [f for f in pasta_raiz.rglob("*.esf") if "RESULTADOS_LIBS" not in f.parts and "backup" not in f.parts]
     
     if not arquivos_esf:
@@ -152,10 +150,8 @@ def processar_espectros_libs_em_lote():
         nome_arquivo = caminho_arquivo.name
         nome_base = caminho_arquivo.stem
         
-        # Pega a estrutura exata de subpastas (ex: NPK 10-10-10/UV/Maxgreen/500ns)
         caminho_relativo = caminho_arquivo.relative_to(pasta_raiz).parent
         
-        # Cria a pasta correspondente dentro de RESULTADOS_LIBS
         dir_destino = pasta_resultados / caminho_relativo
         dir_destino.mkdir(parents=True, exist_ok=True)
         
@@ -182,18 +178,19 @@ def processar_espectros_libs_em_lote():
             df_saida.to_csv(dir_destino / f"{nome_base}_processado.csv", index=False)
             
             if picos_npk:
-                pd.DataFrame(picos_npk).to_csv(dir_destino / f"{nome_base}_picos_identificados.csv", index=False )
+                pd.DataFrame(picos_npk).to_csv(dir_destino / f"{nome_base}_picos_identificados.csv", index=False)
             
-            # 4. Construção do Gráfico diretamente na pasta espelhada
+            # 4. Construção do Gráfico
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
             
-            ax1.plot(wl, intens_suave, color='#7f8c8d', alpha=0.7, label='Espectro Suavizado')
-            ax1.plot(wl, baseline_est, color='#e74c3c', linestyle='--', linewidth=1.5, label='Baseline Estimada')
-            ax1.set_title(f"Remoção de Baseline: {nome_arquivo}", fontsize=11, fontweight='bold')
+            # GRÁFICO SUPERIOR (ax1)
+            ax1.plot(wl, intens_bruta, color='#7f8c8d', alpha=0.9, linewidth=0.8, label='Espectro Bruto')
+            ax1.set_title(f"Sinal Bruto Original: {nome_arquivo}", fontsize=11, fontweight='bold')
             ax1.set_ylabel("Intensidade Absoluta")
             ax1.legend(loc='upper right')
             ax1.grid(True, linestyle=':', alpha=0.6)
             
+            # GRÁFICO INFERIOR (ax2)
             ax2.plot(wl, intens_normalizada, color='#2c3e50', linewidth=1, label='Final: Área Normalizada')
             
             elementos_vistos = set()
